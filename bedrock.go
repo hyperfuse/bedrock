@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	pgxUUID "github.com/vgarvardt/pgx-google-uuid/v5"
 )
@@ -34,6 +35,12 @@ type bedrock struct {
 	api             map[string]api.Controller
 	spa             fs.FS
 	embedMigrations embed.FS
+}
+
+type DefaultRunCmd struct {
+	DatabaseUrl string `env:"DATABASE_URL"`
+	PORT        int    `env:"PORT" default:"3000"`
+	Dev         bool   `help:"Enable development mode."`
 }
 
 func (b *bedrock) handlerFunc() http.HandlerFunc {
@@ -91,6 +98,13 @@ func migrate(dbURL string) error {
 }
 
 func Run(databaseURL string, port int, dev bool) error {
+
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	if dev {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+		log.Warn().Msg("running in development mode")
+	}
 
 	// Migrate the database
 	if err := migrate(databaseURL); err != nil {

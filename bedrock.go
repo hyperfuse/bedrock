@@ -50,7 +50,12 @@ func (b *bedrock) handlerFunc() http.HandlerFunc {
 }
 
 func ApiHandler(path string, controller api.Controller) {
-	server.api[path] = controller
+	if strings.HasPrefix(path, "/") {
+		server.api[path] = controller
+		return
+	}
+	server.api["/"+path] = controller
+
 }
 
 func SPAHandler(spa embed.FS) {
@@ -127,7 +132,6 @@ func Run(databaseURL string, port int, dev bool) error {
 	}
 
 	r.Route("/api", func(r chi.Router) {
-
 		r.Group(func(r chi.Router) {
 			// TODO Add authentication
 			// r.Use(jwtauth.Verifier(controllers.TokenAuth))

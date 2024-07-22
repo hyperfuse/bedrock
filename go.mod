@@ -1,4 +1,4 @@
-module hyperfuse.co/bedrock
+module github.com/hyperfuse/bedrock
 
 go 1.21.5
 

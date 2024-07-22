@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
-	"hyperfuse.co/ratio/sqlc/db"
 )
 
 func TestDBContext(t *testing.T) {

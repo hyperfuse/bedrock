@@ -37,12 +37,19 @@ type bedrock struct {
 	embedMigrations embed.FS
 }
 
-type DefaultRunCmd struct {
-	DatabaseUrl string `env:"DATABASE_URL"`
-	PORT        int    `env:"PORT" default:"3000"`
-	Dev         bool   `help:"Enable development mode."`
+type Configuration struct {
+	DatabaseUrl string
+	Port        int
+	Dev         bool
 }
 
+func NewConfiguration(DatabaseUrl string, port int, dev bool) Configuration {
+	return Configuration{
+		DatabaseUrl: DatabaseUrl,
+		Port:        port,
+		Dev:         dev,
+	}
+}
 func (b *bedrock) handlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		f, err := server.spa.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
@@ -97,22 +104,22 @@ func migrate(dbURL string) error {
 	return nil
 }
 
-func Run(databaseURL string, port int, dev bool) error {
-
+func Run(config Configuration) error {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	if dev {
+	if config.Dev {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		log.Warn().Msg("running in development mode")
 	}
+	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("dev", config.Dev).Msg("Starting server")
 
 	// Migrate the database
-	if err := migrate(databaseURL); err != nil {
+	if err := migrate(config.DatabaseUrl); err != nil {
 		log.Error().Err(err).Msg("unable to migrate the database")
 		os.Exit(1)
 	}
 	// start the connection pool
-	pgxConfig, err := pgxpool.ParseConfig(databaseURL)
+	pgxConfig, err := pgxpool.ParseConfig(config.DatabaseUrl)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to parse the configuration")
 		os.Exit(1)
@@ -121,7 +128,7 @@ func Run(databaseURL string, port int, dev bool) error {
 		pgxUUID.Register(conn.TypeMap())
 		return nil
 	}
-	dbPool, err := pgxpool.New(context.Background(), databaseURL)
+	dbPool, err := pgxpool.New(context.Background(), config.DatabaseUrl)
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to create a pgx pool")
 		os.Exit(1)
@@ -136,7 +143,7 @@ func Run(databaseURL string, port int, dev bool) error {
 	// r.Use(middleware.Recoverer)
 	// r.Use(middleware.URLFormat)
 
-	if dev {
+	if config.Dev {
 		r.Use(cors.Handler(cors.Options{
 			AllowedOrigins:   []string{"*"},
 			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -171,7 +178,7 @@ func Run(databaseURL string, port int, dev bool) error {
 		log.Info().Msg("Serving embedded UI.")
 		r.Handle("/*", server.handlerFunc())
 	}
-	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(port), Handler: r}
+	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(config.Port), Handler: r}
 
 	// Listen for syscall signals for process to interrupt/quit
 	sig := make(chan os.Signal, 1)
@@ -205,7 +212,7 @@ func Run(databaseURL string, port int, dev bool) error {
 		serverStopCtx()
 		cancel()
 	}()
-	log.Info().Int("port", port).Msg("Server started")
+	log.Info().Int("port", config.Port).Msg("Server started")
 	// Run the server
 	err = server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {

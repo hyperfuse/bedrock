@@ -28,12 +28,14 @@ import (
 )
 
 var server = &bedrock{
-	api: map[string]api.Controller{},
+	api:          map[string]api.Controller{},
+	periodicJobs: []PeriodicJobWrapper{},
 }
 
 type bedrock struct {
 	api             map[string]api.Controller
 	spa             fs.FS
+	periodicJobs    []PeriodicJobWrapper
 	embedMigrations embed.FS
 }
 
@@ -49,6 +51,11 @@ func NewConfiguration(DatabaseUrl string, port int, dev bool) Configuration {
 		Port:        port,
 		Dev:         dev,
 	}
+}
+
+func (b *bedrock) PeriodicJob(j PeriodicJobWrapper) {
+	b.periodicJobs = append(b.periodicJobs, j)
+
 }
 func (b *bedrock) handlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +142,13 @@ func Run(config Configuration) error {
 	}
 
 	// Server run context
+	// TODO fix warning
 	serverCtx, serverStopCtx := context.WithCancel(context.Background())
+
+	runner, err := NewRiverRunner(serverCtx, dbPool, server.periodicJobs)
+	if err != nil {
+		return nil
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -196,11 +209,10 @@ func Run(config Configuration) error {
 			}
 		}()
 
-		// TODO: stop the jobs here, before the DB pool
-		// err = jobs.Stop(shutdownCtx)
-		// if err != nil {
-		// 	log.Fatal().Err(err)
-		// }
+		err = runner.Stop(shutdownCtx)
+		if err != nil {
+			log.Fatal().Err(err)
+		}
 		dbPool.Close()
 
 		// Trigger graceful shutdown

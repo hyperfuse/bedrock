@@ -40,15 +40,14 @@ type RiverRunner struct {
 	riverClient *river.Client[pgx.Tx]
 }
 
-func NewRiverRunner(ctx context.Context, pool *pgxpool.Pool, jobs []PeriodicJobWrapper) (*RiverRunner, error) {
+func NewRiverRunner(ctx context.Context, pool *pgxpool.Pool, pjs []PeriodicJobWrapper) (*RiverRunner, error) {
 	// TODO maybe we should consider starting the runner in a different function
-	if len(jobs) != 0 {
+	if len(pjs) != 0 {
 		return &RiverRunner{pool, nil}, nil
 	}
 	workers := river.NewWorkers()
 	periodicJobs := []*river.PeriodicJob{}
-
-	for _, j := range jobs {
+	for _, j := range pjs {
 		river.AddWorker(workers, j.GetWorker())
 		periodicJobs = append(periodicJobs, river.NewPeriodicJob(
 			river.PeriodicInterval(15*time.Minute),

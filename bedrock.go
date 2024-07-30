@@ -22,6 +22,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivermigrate"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	pgxUUID "github.com/vgarvardt/pgx-google-uuid/v5"
@@ -36,6 +39,7 @@ type bedrock struct {
 	api             map[string]api.Controller
 	spa             fs.FS
 	periodicJobs    []PeriodicJobWrapper
+	jobs            []*river.Worker[river.JobArgs]
 	embedMigrations embed.FS
 }
 
@@ -55,8 +59,13 @@ func NewConfiguration(DatabaseUrl string, port int, dev bool) Configuration {
 
 func (b *bedrock) PeriodicJob(j PeriodicJobWrapper) {
 	b.periodicJobs = append(b.periodicJobs, j)
+}
+
+func (b *bedrock) JobHandler(j *river.Worker[river.JobArgs]) {
+	server.jobs = append(server.jobs, j)
 
 }
+
 func (b *bedrock) handlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		f, err := server.spa.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
@@ -76,7 +85,6 @@ func ApiHandler(path string, controller api.Controller) {
 		return
 	}
 	server.api["/"+path] = controller
-
 }
 
 func SPAHandler(spa embed.FS) {
@@ -99,6 +107,17 @@ func migrate(dbURL string) error {
 		fmt.Fprintf(os.Stderr, "Unable to create a pgx pool: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Run the river migration
+	var migrator = rivermigrate.New(riverpgxv5.New(dbPool), nil)
+	_, err = migrator.Migrate(context.Background(), rivermigrate.DirectionUp, &rivermigrate.MigrateOpts{
+		TargetVersion: 2,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Run other migrations
 	goose.SetBaseFS(server.embedMigrations)
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err

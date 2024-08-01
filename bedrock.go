@@ -72,13 +72,16 @@ func (b *bedrock) handlerFunc() http.HandlerFunc {
 	}
 }
 
-func PeriodicJob[T river.JobArgs](j PeriodicJobWrapper[T]) {
+func PeriodicJob[T river.JobArgs](j PeriodicWorker[T]) {
 	river.AddWorker(server.workers, j)
 	server.periodicJobs = append(server.periodicJobs, river.NewPeriodicJob(
 		river.PeriodicInterval(15*time.Minute),
 		j.GetMessage(),
 		&river.PeriodicJobOpts{RunOnStart: true},
 	))
+}
+func Job[T river.JobArgs](j river.Worker[T]) {
+	river.AddWorker(server.workers, j)
 }
 
 func ApiHandler(path string, controller api.Controller) {

@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type PeriodicJobWrapper[T river.JobArgs] interface {
+type PeriodicWorker[T river.JobArgs] interface {
 	river.Worker[T]
 	GetMessage() func() (river.JobArgs, *river.InsertOpts)
 }

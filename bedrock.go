@@ -32,14 +32,16 @@ import (
 
 var server = &bedrock{
 	api:          map[string]api.Controller{},
-	periodicJobs: []PeriodicJobWrapper{},
+	workers:      river.NewWorkers(),
+	periodicJobs: []*river.PeriodicJob{},
 }
 
 type bedrock struct {
-	api             map[string]api.Controller
-	spa             fs.FS
-	periodicJobs    []PeriodicJobWrapper
-	jobs            []*river.Worker[river.JobArgs]
+	api          map[string]api.Controller
+	spa          fs.FS
+	workers      *river.Workers
+	periodicJobs []*river.PeriodicJob
+
 	embedMigrations embed.FS
 }
 
@@ -57,15 +59,6 @@ func NewConfiguration(DatabaseUrl string, port int, dev bool) Configuration {
 	}
 }
 
-func (b *bedrock) PeriodicJob(j PeriodicJobWrapper) {
-	b.periodicJobs = append(b.periodicJobs, j)
-}
-
-func (b *bedrock) JobHandler(j *river.Worker[river.JobArgs]) {
-	server.jobs = append(server.jobs, j)
-
-}
-
 func (b *bedrock) handlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		f, err := server.spa.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
@@ -77,6 +70,15 @@ func (b *bedrock) handlerFunc() http.HandlerFunc {
 		}
 		http.FileServer(http.FS(server.spa)).ServeHTTP(w, r)
 	}
+}
+
+func PeriodicJob[T river.JobArgs](j PeriodicJobWrapper[T]) {
+	river.AddWorker(server.workers, j)
+	server.periodicJobs = append(server.periodicJobs, river.NewPeriodicJob(
+		river.PeriodicInterval(15*time.Minute),
+		j.GetMessage(),
+		&river.PeriodicJobOpts{RunOnStart: true},
+	))
 }
 
 func ApiHandler(path string, controller api.Controller) {
@@ -110,9 +112,7 @@ func migrate(dbURL string) error {
 
 	// Run the river migration
 	var migrator = rivermigrate.New(riverpgxv5.New(dbPool), nil)
-	_, err = migrator.Migrate(context.Background(), rivermigrate.DirectionUp, &rivermigrate.MigrateOpts{
-		TargetVersion: 2,
-	})
+	_, err = migrator.Migrate(context.Background(), rivermigrate.DirectionUp, &rivermigrate.MigrateOpts{})
 	if err != nil {
 		return err
 	}
@@ -144,6 +144,7 @@ func Run(config Configuration) error {
 		log.Error().Err(err).Msg("unable to migrate the database")
 		os.Exit(1)
 	}
+
 	// start the connection pool
 	pgxConfig, err := pgxpool.ParseConfig(config.DatabaseUrl)
 	if err != nil {
@@ -164,9 +165,9 @@ func Run(config Configuration) error {
 	// TODO fix warning
 	serverCtx, serverStopCtx := context.WithCancel(context.Background())
 
-	runner, err := NewRiverRunner(serverCtx, dbPool, server.periodicJobs)
+	runner, err := NewRiverRunner(serverCtx, dbPool, server.workers, server.periodicJobs)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	r := chi.NewRouter()

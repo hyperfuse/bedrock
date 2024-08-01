@@ -2,7 +2,6 @@ package bedrock
 
 import (
 	"context"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,10 +12,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type PeriodicJobWrapper interface {
-	GetWorker() river.Worker[river.JobArgs]
-	// TODO change name
-	GetJobDetails() func() (river.JobArgs, *river.InsertOpts)
+type PeriodicJobWrapper[T river.JobArgs] interface {
+	river.Worker[T]
+	GetMessage() func() (river.JobArgs, *river.InsertOpts)
 }
 
 type CustomErrorHandler struct{}
@@ -40,29 +38,14 @@ type RiverRunner struct {
 	riverClient *river.Client[pgx.Tx]
 }
 
-func NewRiverRunner(ctx context.Context, pool *pgxpool.Pool, pjs []PeriodicJobWrapper) (*RiverRunner, error) {
-	// TODO maybe we should consider starting the runner in a different function
-	if len(pjs) != 0 {
-		return &RiverRunner{pool, nil}, nil
-	}
-	workers := river.NewWorkers()
-	periodicJobs := []*river.PeriodicJob{}
-	for _, j := range pjs {
-		river.AddWorker(workers, j.GetWorker())
-		periodicJobs = append(periodicJobs, river.NewPeriodicJob(
-			river.PeriodicInterval(15*time.Minute),
-			j.GetJobDetails(),
-			&river.PeriodicJobOpts{RunOnStart: true},
-		))
-	}
-
+func NewRiverRunner(ctx context.Context, pool *pgxpool.Pool, workers *river.Workers, jobs []*river.PeriodicJob) (*RiverRunner, error) {
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			"default": {MaxWorkers: 1},
 		},
 		ErrorHandler: &CustomErrorHandler{},
 		Workers:      workers,
-		PeriodicJobs: periodicJobs,
+		PeriodicJobs: jobs,
 	})
 	if err != nil {
 		return nil, err
@@ -83,7 +66,6 @@ func (r *RiverRunner) Stop(ctx context.Context) error {
 		return r.riverClient.Stop(ctx)
 	}
 	return nil
-
 }
 
 func (r *RiverRunner) Submit(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) error {

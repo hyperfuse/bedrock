@@ -1,7 +1,9 @@
-package bedrock
+package job
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,6 +13,25 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+type contextKey string
+
+const (
+	JobRunnerKey contextKey = "database"
+)
+
+func JobContext(runner JobRunner) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := context.WithValue(r.Context(), JobRunnerKey, runner)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+type Worker[T river.JobArgs] interface {
+	river.Worker[T]
+}
 
 type PeriodicWorker[T river.JobArgs] interface {
 	river.Worker[T]
@@ -24,8 +45,11 @@ func (*CustomErrorHandler) HandleError(ctx context.Context, job *rivertype.JobRo
 	return nil
 }
 
-func (*CustomErrorHandler) HandlePanic(ctx context.Context, job *rivertype.JobRow, panicVal any, v string) *river.ErrorHandlerResult {
+func (*CustomErrorHandler) HandlePanic(ctx context.Context, job *rivertype.JobRow, panicVal any, trace string) *river.ErrorHandlerResult {
 	zerolog.Ctx(ctx).Error().Any("panic_val", panicVal).Msg("Job failed")
+	// TODO only-do this in debug mode
+	fmt.Printf("Job panicked with: %v\n", panicVal)
+	fmt.Printf("Stack trace: %s\n", trace)
 	return nil
 }
 
@@ -34,8 +58,8 @@ type JobRunner interface {
 }
 
 type RiverRunner struct {
-	pool        *pgxpool.Pool
-	riverClient *river.Client[pgx.Tx]
+	pool *pgxpool.Pool
+	*river.Client[pgx.Tx]
 }
 
 func NewRiverRunner(ctx context.Context, pool *pgxpool.Pool, workers *river.Workers, jobs []*river.PeriodicJob) (*RiverRunner, error) {
@@ -56,16 +80,13 @@ func NewRiverRunner(ctx context.Context, pool *pgxpool.Pool, workers *river.Work
 	}
 
 	return &RiverRunner{
-		pool:        pool,
-		riverClient: riverClient,
+		pool,
+		riverClient,
 	}, nil
 }
 
 func (r *RiverRunner) Stop(ctx context.Context) error {
-	if r.riverClient != nil {
-		return r.riverClient.Stop(ctx)
-	}
-	return nil
+	return r.Stop(ctx)
 }
 
 func (r *RiverRunner) Submit(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) error {
@@ -80,7 +101,7 @@ func (r *RiverRunner) Submit(ctx context.Context, args river.JobArgs, opts *rive
 		}
 	}()
 
-	_, err = r.riverClient.InsertTx(ctx, tx, args, opts)
+	_, err = r.InsertTx(ctx, tx, args, opts)
 	if err != nil {
 		return err
 	}

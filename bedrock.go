@@ -17,7 +17,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/hyperfuse/bedrock/api"
+	"github.com/hyperfuse/bedrock/cache"
+	"github.com/hyperfuse/bedrock/handler"
+	"github.com/hyperfuse/bedrock/job"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -30,82 +32,139 @@ import (
 	pgxUUID "github.com/vgarvardt/pgx-google-uuid/v5"
 )
 
-var server = &bedrock{
-	api:          map[string]api.Controller{},
-	workers:      river.NewWorkers(),
-	periodicJobs: []*river.PeriodicJob{},
-}
-
 type bedrock struct {
-	api          map[string]api.Controller
-	spa          fs.FS
-	workers      *river.Workers
-	periodicJobs []*river.PeriodicJob
-
+	api             map[string]handler.Controller
+	spa             fs.FS
 	embedMigrations embed.FS
+	dbCreator       func(*pgxpool.Conn) any
+
+	config Configuration
+	pool   *pgxpool.Pool
+	cache  *cache.Cache
 }
 
 type Configuration struct {
 	DatabaseUrl string
 	Port        int
 	Dev         bool
+	CachePath   string
 }
 
-func NewConfiguration(DatabaseUrl string, port int, dev bool) Configuration {
+func NewConfiguration(DatabaseUrl string, port int, dev bool, cachePath string) Configuration {
 	return Configuration{
 		DatabaseUrl: DatabaseUrl,
 		Port:        port,
 		Dev:         dev,
+		CachePath:   cachePath,
 	}
+}
+
+func New(config Configuration) (*bedrock, error) {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	if config.Dev {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+		log.Warn().Msg("running in development mode")
+	}
+	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("dev", config.Dev).Str("cache path", config.CachePath).Msg("Starting server")
+
+	// start the connection pool
+	pgxConfig, err := pgxpool.ParseConfig(config.DatabaseUrl)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to parse the configuration")
+		return &bedrock{}, err
+	}
+	pgxConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		pgxUUID.Register(conn.TypeMap())
+		return nil
+	}
+	dbPool, err := pgxpool.New(context.Background(), config.DatabaseUrl)
+	if err != nil {
+		log.Fatal().Err(err).Msg("unable to create a pgx pool")
+		return &bedrock{}, err
+	}
+
+	cache, err := cache.New(config.CachePath)
+	if err != nil {
+		log.Fatal().Err(err).Msg("unable to create a cache")
+		return &bedrock{}, err
+	}
+
+	return &bedrock{
+		api:    map[string]handler.Controller{},
+		config: config,
+		pool:   dbPool,
+		cache:  cache,
+	}, nil
+}
+
+func (b *bedrock) Pool() *pgxpool.Pool {
+	return b.pool
+}
+
+func (b *bedrock) Cache() *cache.Cache {
+	return b.cache
 }
 
 func (b *bedrock) handlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		f, err := server.spa.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
+		f, err := b.spa.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
 		if err == nil {
 			defer f.Close()
 		}
 		if os.IsNotExist(err) {
 			r.URL.Path = "/"
 		}
-		http.FileServer(http.FS(server.spa)).ServeHTTP(w, r)
+		http.FileServer(http.FS(b.spa)).ServeHTTP(w, r)
 	}
 }
 
-func PeriodicJob[T river.JobArgs](j PeriodicWorker[T]) {
-	river.AddWorker(server.workers, j)
-	server.periodicJobs = append(server.periodicJobs, river.NewPeriodicJob(
-		river.PeriodicInterval(15*time.Minute),
-		j.GetMessage(),
-		&river.PeriodicJobOpts{RunOnStart: true},
-	))
-}
-func Job[T river.JobArgs](j river.Worker[T]) {
-	river.AddWorker(server.workers, j)
+func (b *bedrock) DB(creator func(*pgxpool.Conn) any) {
+	b.dbCreator = creator
 }
 
-func ApiHandler(path string, controller api.Controller) {
+var workers = river.NewWorkers()
+var periodicJobs = []*river.PeriodicJob{}
+
+func Worker[T river.JobArgs](j job.Worker[T]) {
+	river.AddWorker(workers, j)
+	switch v := j.(type) {
+	case job.PeriodicWorker[river.JobArgs]:
+		periodicJobs = append(periodicJobs, river.NewPeriodicJob(
+			river.PeriodicInterval(15*time.Minute),
+			v.GetMessage(),
+			&river.PeriodicJobOpts{RunOnStart: true},
+		))
+	}
+
+}
+
+func (b *bedrock) Submit(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) error {
+	return nil
+}
+
+func (b *bedrock) Handler(path string, controller handler.Controller) {
 	if strings.HasPrefix(path, "/") {
-		server.api[path] = controller
+		b.api[path] = controller
 		return
 	}
-	server.api["/"+path] = controller
+	b.api["/"+path] = controller
 }
 
-func SPAHandler(spa embed.FS) {
+func (b *bedrock) SPAHandler(spa embed.FS) {
 	spaFS, err := fs.Sub(spa, "dist")
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed getting the sub tree for the site files")
 	}
-	server.spa = spaFS
+	b.spa = spaFS
 
 }
 
-func Migrations(fs embed.FS) {
-	server.embedMigrations = fs
+func (b *bedrock) Migrations(fs embed.FS) {
+	b.embedMigrations = fs
 }
 
-func migrate(dbURL string) error {
+func migrate(dbURL string, migrations fs.FS) error {
 	ctx := context.Background()
 	dbPool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
@@ -121,7 +180,7 @@ func migrate(dbURL string) error {
 	}
 
 	// Run other migrations
-	goose.SetBaseFS(server.embedMigrations)
+	goose.SetBaseFS(migrations)
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
@@ -133,42 +192,17 @@ func migrate(dbURL string) error {
 	return nil
 }
 
-func Run(config Configuration) error {
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	if config.Dev {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-		log.Warn().Msg("running in development mode")
-	}
-	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("dev", config.Dev).Msg("Starting server")
-
+func (b *bedrock) Run() error {
 	// Migrate the database
-	if err := migrate(config.DatabaseUrl); err != nil {
+	if err := migrate(b.config.DatabaseUrl, b.embedMigrations); err != nil {
 		log.Error().Err(err).Msg("unable to migrate the database")
-		os.Exit(1)
+		return err
 	}
-
-	// start the connection pool
-	pgxConfig, err := pgxpool.ParseConfig(config.DatabaseUrl)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to parse the configuration")
-		os.Exit(1)
-	}
-	pgxConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		pgxUUID.Register(conn.TypeMap())
-		return nil
-	}
-	dbPool, err := pgxpool.New(context.Background(), config.DatabaseUrl)
-	if err != nil {
-		log.Fatal().Err(err).Msg("unable to create a pgx pool")
-		os.Exit(1)
-	}
-
 	// Server run context
 	// TODO fix warning
 	serverCtx, serverStopCtx := context.WithCancel(context.Background())
 
-	runner, err := NewRiverRunner(serverCtx, dbPool, server.workers, server.periodicJobs)
+	runner, err := job.NewRiverRunner(serverCtx, b.pool, workers, periodicJobs)
 	if err != nil {
 		return err
 	}
@@ -176,10 +210,10 @@ func Run(config Configuration) error {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	// r.Use(middleware.RequestID)
-	// r.Use(middleware.Recoverer)
+	// r.Use(middleware.Recoverer) // TODO add this by default
 	// r.Use(middleware.URLFormat)
 
-	if config.Dev {
+	if b.config.Dev {
 		r.Use(cors.Handler(cors.Options{
 			AllowedOrigins:   []string{"*"},
 			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -188,33 +222,27 @@ func Run(config Configuration) error {
 		}))
 	}
 
-	r.Route("/api", func(r chi.Router) {
+	r.Route("/", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
-			// TODO Add authentication
-			// r.Use(jwtauth.Verifier(controllers.TokenAuth))
-			// r.Use(jwtauth.Authenticator(controllers.TokenAuth))
-			// r.Use(middleware.UserContext)
-			//
-			// TODO configure SQLC DB
-			// r.Use(middleware.DBContext(dbPool))
-
-			for path, c := range server.api {
+			if b.dbCreator != nil {
+				r.Use(handler.DBContext(b.pool, b.dbCreator))
+			}
+			r.Use(job.JobContext(runner))
+			for path, c := range b.api {
 				r.Mount(path, c.Routes())
 			}
 		})
-
-		// r.Group(func(r chi.Router) {
-		// 	r.Use(controllers.DBContext(dbPool))
-		// 	r.Mount("/auth", controllers.NewAuthController().Routes())
-		// })
-
 	})
 
-	if server.spa != nil {
+	//TODO: should expose this differently. For now if should be enough
+	filesDir := http.Dir(b.config.CachePath)
+	FileServer(r, "/static", filesDir)
+
+	if b.spa != nil {
 		log.Info().Msg("Serving embedded UI.")
-		r.Handle("/*", server.handlerFunc())
+		r.Handle("/*", b.handlerFunc())
 	}
-	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(config.Port), Handler: r}
+	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(b.config.Port), Handler: r}
 
 	// Listen for syscall signals for process to interrupt/quit
 	sig := make(chan os.Signal, 1)
@@ -236,7 +264,7 @@ func Run(config Configuration) error {
 		if err != nil {
 			log.Fatal().Err(err)
 		}
-		dbPool.Close()
+		b.pool.Close()
 
 		// Trigger graceful shutdown
 		err := server.Shutdown(shutdownCtx)
@@ -247,7 +275,7 @@ func Run(config Configuration) error {
 		serverStopCtx()
 		cancel()
 	}()
-	log.Info().Int("port", config.Port).Msg("Server started")
+	log.Info().Int("port", b.config.Port).Msg("Server started")
 	// Run the server
 	err = server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
@@ -257,4 +285,23 @@ func Run(config Configuration) error {
 	// Wait for server context to be stopped
 	<-serverCtx.Done()
 	return nil
+}
+
+func FileServer(r chi.Router, path string, root http.FileSystem) {
+	if strings.ContainsAny(path, "{}*") {
+		panic("FileServer does not permit any URL parameters.")
+	}
+
+	if path != "/" && path[len(path)-1] != '/' {
+		r.Get(path, http.RedirectHandler(path+"/", 301).ServeHTTP)
+		path += "/"
+	}
+	path += "*"
+
+	r.Get(path, func(w http.ResponseWriter, r *http.Request) {
+		rctx := chi.RouteContext(r.Context())
+		pathPrefix := strings.TrimSuffix(rctx.RoutePattern(), "/*")
+		fs := http.StripPrefix(pathPrefix, http.FileServer(root))
+		fs.ServeHTTP(w, r)
+	})
 }

@@ -48,7 +48,18 @@ func JSON[T any](r *http.Request) (T, error) {
 func Query[T any](r *http.Request) (T, error) {
 	request := new(T)
 
-	err := dec.Decode(request, r.URL.Query())
+	params := r.URL.Query()
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+
+		for i, key := range rctx.URLParams.Keys {
+			if key != "*" {
+				params.Add(key, rctx.URLParams.Values[i])
+			}
+
+		}
+	}
+
+	err := dec.Decode(request, params)
 	if err != nil {
 		return *request, err
 	}

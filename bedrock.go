@@ -247,31 +247,28 @@ func (b *bedrock) Run() error {
 	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(b.config.Port), Handler: r}
 
 	log.Info().Int("port", b.config.Port).Msg("Server started")
-	// Run the server
+
 	go func() {
-		err = server.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
+		<-ctx.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		log.Info().Msg("Shutting down server..")
+		err = runner.GracefulStop(ctx)
+		if err != nil {
+			log.Fatal().Err(err)
+		}
+
+		err = server.Shutdown(ctx)
+		if err != nil {
 			log.Fatal().Err(err)
 		}
 	}()
 
-	// Wait for server context to be stopped
-	<-ctx.Done()
-
-	log.Info().Msg("Shutting down server..")
-
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelShutdown()
-	err = runner.GracefulStop(shutdownCtx)
-	if err != nil {
+	err = server.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
 		log.Fatal().Err(err)
 	}
-
-	err = server.Shutdown(shutdownCtx)
-	if err != nil {
-		log.Fatal().Err(err)
-	}
-
 	return nil
 }
 

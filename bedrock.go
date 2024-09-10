@@ -199,10 +199,10 @@ func (b *bedrock) Run() error {
 		return err
 	}
 	// Server run context
-	// TODO fix warning
-	serverCtx, serverStopCtx := context.WithCancel(context.Background())
-
-	runner, err := job.NewRiverRunner(serverCtx, b.pool, workers, periodicJobs)
+	// serverCtx, serverStopCtx := context.WithCancel(context.Background())
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	runner, err := job.NewRiverRunner(ctx, b.pool, workers, periodicJobs)
 	if err != nil {
 		return err
 	}
@@ -244,46 +244,32 @@ func (b *bedrock) Run() error {
 	}
 	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(b.config.Port), Handler: r}
 
-	// Listen for syscall signals for process to interrupt/quit
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt)
-	go func() {
-		<-sig
-		log.Info().Msg("Shutting down server..")
-
-		// Shutdown signal with grace period of 30 seconds
-		shutdownCtx, cancel := context.WithTimeout(serverCtx, 30*time.Second)
-		go func() {
-			<-shutdownCtx.Done()
-			if shutdownCtx.Err() == context.DeadlineExceeded {
-				log.Fatal().Msg("graceful shutdown timed out.. forcing exit.")
-			}
-		}()
-
-		err = runner.Stop(shutdownCtx)
-		if err != nil {
-			log.Fatal().Err(err)
-		}
-		b.pool.Close()
-
-		// Trigger graceful shutdown
-		err := server.Shutdown(shutdownCtx)
-		if err != nil {
-			log.Fatal().Err(err)
-		}
-
-		serverStopCtx()
-		cancel()
-	}()
 	log.Info().Int("port", b.config.Port).Msg("Server started")
 	// Run the server
-	err = server.ListenAndServe()
-	if err != nil && err != http.ErrServerClosed {
+	go func() {
+		err = server.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err)
+		}
+	}()
+
+	// Wait for server context to be stopped
+	<-ctx.Done()
+
+	log.Info().Msg("Shutting down server..")
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelShutdown()
+	err = runner.GracefulStop(shutdownCtx)
+	if err != nil {
 		log.Fatal().Err(err)
 	}
 
-	// Wait for server context to be stopped
-	<-serverCtx.Done()
+	err = server.Shutdown(shutdownCtx)
+	if err != nil {
+		log.Fatal().Err(err)
+	}
+
 	return nil
 }
 

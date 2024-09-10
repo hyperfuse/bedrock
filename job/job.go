@@ -85,7 +85,7 @@ func NewRiverRunner(ctx context.Context, pool *pgxpool.Pool, workers *river.Work
 	}, nil
 }
 
-func (r *RiverRunner) Stop(ctx context.Context) error {
+func (r *RiverRunner) GracefulStop(ctx context.Context) error {
 	return r.Stop(ctx)
 }
 

@@ -108,6 +108,7 @@ func (b *bedrock) Cache() *cache.Cache {
 
 func (b *bedrock) handlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		println("HFHF")
 		f, err := b.spa.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
 		if err == nil {
 			defer f.Close()
@@ -229,19 +230,20 @@ func (b *bedrock) Run() error {
 			}
 			r.Use(job.JobContext(runner))
 			for path, c := range b.api {
+				println(path)
 				r.Mount(path, c.Routes())
 			}
 		})
+		if b.spa != nil {
+			log.Info().Msg("Serving embedded UI.")
+			r.Handle("/*", b.handlerFunc())
+		}
 	})
 
 	//TODO: should expose this differently. For now if should be enough
 	filesDir := http.Dir(b.config.CachePath)
 	FileServer(r, "/static", filesDir)
 
-	if b.spa != nil {
-		log.Info().Msg("Serving embedded UI.")
-		r.Handle("/*", b.handlerFunc())
-	}
 	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(b.config.Port), Handler: r}
 
 	log.Info().Int("port", b.config.Port).Msg("Server started")

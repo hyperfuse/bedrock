@@ -48,6 +48,7 @@ type Configuration struct {
 	DatabaseUrl string
 	Port        int
 	Dev         bool
+	Journald    bool
 	CachePath   string
 }
 
@@ -66,7 +67,8 @@ func New(config Configuration) (*bedrock, error) {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		log.Warn().Msg("running in development mode")
-	} else {
+	}
+	if config.Journald {
 		log.Logger = log.Output(journald.NewJournalDWriter())
 	}
 	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("dev", config.Dev).Str("cache path", config.CachePath).Msg("Starting server")

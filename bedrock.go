@@ -28,6 +28,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/journald"
 	"github.com/rs/zerolog/log"
 	pgxUUID "github.com/vgarvardt/pgx-google-uuid/v5"
 )
@@ -65,6 +66,8 @@ func New(config Configuration) (*bedrock, error) {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		log.Warn().Msg("running in development mode")
+	} else {
+		log.Logger = log.Output(journald.NewJournalDWriter())
 	}
 	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("dev", config.Dev).Str("cache path", config.CachePath).Msg("Starting server")
 

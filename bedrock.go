@@ -186,6 +186,7 @@ func migrate(dbURL string, migrations fs.FS) error {
 
 	// Run other migrations
 	goose.SetBaseFS(migrations)
+	goose.SetLogger(&ZerologGooseLogger{})
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
@@ -195,6 +196,16 @@ func migrate(dbURL string, migrations fs.FS) error {
 		return err
 	}
 	return nil
+}
+
+type ZerologGooseLogger struct {
+}
+
+func (z *ZerologGooseLogger) Fatalf(format string, v ...interface{}) {
+	log.Fatal().Msgf(format, v...)
+}
+func (z *ZerologGooseLogger) Printf(format string, v ...interface{}) {
+	log.Info().Msgf(format, v...)
 }
 
 func (b *bedrock) Run() error {

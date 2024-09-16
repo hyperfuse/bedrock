@@ -47,17 +47,19 @@ type Configuration struct {
 	DatabaseUrl     string
 	Port            int
 	Debug           bool
+	Dev             bool
 	DisableJSONLogs bool
 	CachePath       string
 }
 
-func NewConfiguration(DatabaseUrl string, port int, debug bool, disableJsonLogs bool, cachePath string) Configuration {
+func NewConfiguration(DatabaseUrl string, port int, debug bool, dev bool, disableJsonLogs bool, cachePath string) Configuration {
 	return Configuration{
 		DatabaseUrl:     DatabaseUrl,
 		Port:            port,
 		DisableJSONLogs: disableJsonLogs,
 		Debug:           debug,
 		CachePath:       cachePath,
+		Dev:             dev,
 	}
 }
 

@@ -28,7 +28,6 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/journald"
 	"github.com/rs/zerolog/log"
 	pgxUUID "github.com/vgarvardt/pgx-google-uuid/v5"
 )
@@ -45,22 +44,20 @@ type bedrock struct {
 }
 
 type Configuration struct {
-	DatabaseUrl string
-	Port        int
-	Debug       bool
-	Journald    bool
-	NoJSON      bool
-	CachePath   string
+	DatabaseUrl     string
+	Port            int
+	Debug           bool
+	DisableJsonLogs bool
+	CachePath       string
 }
 
-func NewConfiguration(DatabaseUrl string, port int, debug bool, journald bool, noJson bool, cachePath string) Configuration {
+func NewConfiguration(DatabaseUrl string, port int, debug bool, disableJsonLogs bool, cachePath string) Configuration {
 	return Configuration{
-		DatabaseUrl: DatabaseUrl,
-		Port:        port,
-		Journald:    journald,
-		NoJSON:      noJson,
-		Debug:       debug,
-		CachePath:   cachePath,
+		DatabaseUrl:     DatabaseUrl,
+		Port:            port,
+		DisableJsonLogs: disableJsonLogs,
+		Debug:           debug,
+		CachePath:       cachePath,
 	}
 }
 
@@ -69,10 +66,8 @@ func New(config Configuration) (*bedrock, error) {
 	if config.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
-	if config.NoJSON {
+	if config.DisableJSONLogs {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	} else if config.Journald {
-		log.Logger = log.Output(journald.NewJournalDWriter())
 	}
 	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("debug", config.Debug).Str("cache path", config.CachePath).Msg("Starting server")
 

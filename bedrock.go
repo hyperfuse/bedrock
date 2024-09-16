@@ -202,10 +202,10 @@ type ZerologGooseLogger struct {
 }
 
 func (z *ZerologGooseLogger) Fatalf(format string, v ...interface{}) {
-	log.Fatal().Msgf(format, v...)
+	log.Fatal().Msgf(strings.TrimSuffix(format, "\n"), v...)
 }
 func (z *ZerologGooseLogger) Printf(format string, v ...interface{}) {
-	log.Info().Msgf(format, v...)
+	log.Info().Msgf(strings.TrimSuffix(format, "\n"), v...)
 }
 
 func (b *bedrock) Run() error {

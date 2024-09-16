@@ -52,11 +52,12 @@ type Configuration struct {
 	CachePath   string
 }
 
-func NewConfiguration(DatabaseUrl string, port int, dev bool, cachePath string) Configuration {
+func NewConfiguration(DatabaseUrl string, port int, dev bool, journald bool, cachePath string) Configuration {
 	return Configuration{
 		DatabaseUrl: DatabaseUrl,
 		Port:        port,
 		Dev:         dev,
+		Journald:    journald,
 		CachePath:   cachePath,
 	}
 }

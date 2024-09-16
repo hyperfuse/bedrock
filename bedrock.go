@@ -47,7 +47,7 @@ type Configuration struct {
 	DatabaseUrl     string
 	Port            int
 	Debug           bool
-	DisableJsonLogs bool
+	DisableJSONLogs bool
 	CachePath       string
 }
 
@@ -55,7 +55,7 @@ func NewConfiguration(DatabaseUrl string, port int, debug bool, disableJsonLogs 
 	return Configuration{
 		DatabaseUrl:     DatabaseUrl,
 		Port:            port,
-		DisableJsonLogs: disableJsonLogs,
+		DisableJSONLogs: disableJsonLogs,
 		Debug:           debug,
 		CachePath:       cachePath,
 	}

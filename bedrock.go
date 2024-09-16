@@ -47,32 +47,34 @@ type bedrock struct {
 type Configuration struct {
 	DatabaseUrl string
 	Port        int
-	Dev         bool
+	Debug       bool
 	Journald    bool
+	NoJSON      bool
 	CachePath   string
 }
 
-func NewConfiguration(DatabaseUrl string, port int, dev bool, journald bool, cachePath string) Configuration {
+func NewConfiguration(DatabaseUrl string, port int, debug bool, journald bool, noJson bool, cachePath string) Configuration {
 	return Configuration{
 		DatabaseUrl: DatabaseUrl,
 		Port:        port,
-		Dev:         dev,
 		Journald:    journald,
+		NoJSON:      noJson,
+		Debug:       debug,
 		CachePath:   cachePath,
 	}
 }
 
 func New(config Configuration) (*bedrock, error) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	if config.Dev {
+	if config.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-		log.Warn().Msg("running in development mode")
 	}
-	if config.Journald {
+	if config.NoJSON {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	} else if config.Journald {
 		log.Logger = log.Output(journald.NewJournalDWriter())
 	}
-	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("dev", config.Dev).Str("cache path", config.CachePath).Msg("Starting server")
+	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("debug", config.Debug).Str("cache path", config.CachePath).Msg("Starting server")
 
 	// start the connection pool
 	pgxConfig, err := pgxpool.ParseConfig(config.DatabaseUrl)
@@ -114,7 +116,6 @@ func (b *bedrock) Cache() *cache.Cache {
 
 func (b *bedrock) handlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		println("HFHF")
 		f, err := b.spa.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
 		if err == nil {
 			defer f.Close()
@@ -236,7 +237,6 @@ func (b *bedrock) Run() error {
 			}
 			r.Use(job.JobContext(runner))
 			for path, c := range b.api {
-				println(path)
 				r.Mount(path, c.Routes())
 			}
 		})

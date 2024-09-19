@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/hyperfuse/bedrock/cache"
+	"github.com/hyperfuse/bedrock/cmd"
 	"github.com/hyperfuse/bedrock/handler"
 	"github.com/hyperfuse/bedrock/job"
 	"github.com/jackc/pgx/v5"
@@ -38,32 +39,12 @@ type bedrock struct {
 	embedMigrations embed.FS
 	dbCreator       func(*pgxpool.Conn) any
 
-	config Configuration
+	config cmd.Cli
 	pool   *pgxpool.Pool
 	cache  *cache.Cache
 }
 
-type Configuration struct {
-	DatabaseUrl     string
-	Port            int
-	Debug           bool
-	Dev             bool
-	DisableJSONLogs bool
-	CachePath       string
-}
-
-func NewConfiguration(DatabaseUrl string, port int, debug bool, dev bool, disableJsonLogs bool, cachePath string) Configuration {
-	return Configuration{
-		DatabaseUrl:     DatabaseUrl,
-		Port:            port,
-		DisableJSONLogs: disableJsonLogs,
-		Debug:           debug,
-		CachePath:       cachePath,
-		Dev:             dev,
-	}
-}
-
-func New(config Configuration) (*bedrock, error) {
+func New(config cmd.Cli) (*bedrock, error) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	if config.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)

@@ -9,22 +9,22 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type Cache struct {
+type Storage struct {
 	rootPath string
 }
 
-func New(rootPath string) (*Cache, error) {
+func New(rootPath string) (*Storage, error) {
 	if _, err := os.Stat(rootPath); os.IsNotExist(err) {
 		err := os.MkdirAll(rootPath, 0755)
 		if err != nil {
-			return &Cache{rootPath}, err
+			return &Storage{rootPath}, err
 		}
 	}
 	log.Debug().Str("path", rootPath).Msg("Root path when creating Cache")
-	return &Cache{rootPath}, nil
+	return &Storage{rootPath}, nil
 }
 
-func (c *Cache) Download(url string, to string) error {
+func (s *Storage) Download(url string, to string) error {
 	parent := filepath.Dir(to)
 	if parent != "" {
 		err := os.MkdirAll(filepath.Join(c.rootPath, parent), 0755)

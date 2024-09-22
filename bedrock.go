@@ -17,10 +17,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/hyperfuse/bedrock/cache"
 	"github.com/hyperfuse/bedrock/cmd"
 	"github.com/hyperfuse/bedrock/handler"
 	"github.com/hyperfuse/bedrock/job"
+	"github.com/hyperfuse/bedrock/storage"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -41,7 +41,7 @@ type bedrock struct {
 
 	config cmd.Cli
 	pool   *pgxpool.Pool
-	cache  *cache.Cache
+	cache  *storage.Storage
 }
 
 func New(config cmd.Cli) (*bedrock, error) {
@@ -52,7 +52,7 @@ func New(config cmd.Cli) (*bedrock, error) {
 	if config.DisableJSONLogs {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	}
-	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("debug", config.Debug).Str("cache path", config.CachePath).Msg("Starting server")
+	log.Info().Str("db_url", config.DatabaseUrl).Int("Port", config.Port).Bool("debug", config.Debug).Str("cache path", config.Storage).Msg("Starting server")
 
 	// start the connection pool
 	pgxConfig, err := pgxpool.ParseConfig(config.DatabaseUrl)
@@ -70,7 +70,7 @@ func New(config cmd.Cli) (*bedrock, error) {
 		return &bedrock{}, err
 	}
 
-	cache, err := cache.New(config.CachePath)
+	cache, err := storage.New(config.Storage)
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to create a cache")
 		return &bedrock{}, err
@@ -88,7 +88,7 @@ func (b *bedrock) Pool() *pgxpool.Pool {
 	return b.pool
 }
 
-func (b *bedrock) Cache() *cache.Cache {
+func (b *bedrock) Cache() *storage.Storage {
 	return b.cache
 }
 
@@ -236,7 +236,7 @@ func (b *bedrock) Run() error {
 	})
 
 	//TODO: should expose this differently. For now if should be enough
-	filesDir := http.Dir(b.config.CachePath)
+	filesDir := http.Dir(b.config.Storage)
 	FileServer(r, "/static", filesDir)
 
 	server := &http.Server{Addr: "0.0.0.0:" + strconv.Itoa(b.config.Port), Handler: r}

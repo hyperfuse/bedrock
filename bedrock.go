@@ -39,9 +39,9 @@ type bedrock struct {
 	embedMigrations embed.FS
 	dbCreator       func(*pgxpool.Conn) any
 
-	config cmd.Cli
-	pool   *pgxpool.Pool
-	cache  *storage.Storage
+	config  cmd.Cli
+	pool    *pgxpool.Pool
+	storage *storage.Storage
 }
 
 func New(config cmd.Cli) (*bedrock, error) {
@@ -70,17 +70,17 @@ func New(config cmd.Cli) (*bedrock, error) {
 		return &bedrock{}, err
 	}
 
-	cache, err := storage.New(config.Storage)
+	storage, err := storage.New(config.Storage)
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to create a cache")
 		return &bedrock{}, err
 	}
 
 	return &bedrock{
-		api:    map[string]handler.Controller{},
-		config: config,
-		pool:   dbPool,
-		cache:  cache,
+		api:     map[string]handler.Controller{},
+		config:  config,
+		pool:    dbPool,
+		storage: storage,
 	}, nil
 }
 
@@ -88,8 +88,8 @@ func (b *bedrock) Pool() *pgxpool.Pool {
 	return b.pool
 }
 
-func (b *bedrock) Cache() *storage.Storage {
-	return b.cache
+func (b *bedrock) Storage() *storage.Storage {
+	return b.storage
 }
 
 func (b *bedrock) handlerFunc() http.HandlerFunc {

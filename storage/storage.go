@@ -27,13 +27,13 @@ func New(rootPath string) (*Storage, error) {
 func (s *Storage) Download(url string, to string) error {
 	parent := filepath.Dir(to)
 	if parent != "" {
-		err := os.MkdirAll(filepath.Join(c.rootPath, parent), 0755)
+		err := os.MkdirAll(filepath.Join(s.rootPath, parent), 0755)
 		if err != nil {
 			return err
 		}
 	}
-	fp := filepath.Join(c.rootPath, to)
-	err := os.MkdirAll(filepath.Join(c.rootPath, parent), 0755)
+	fp := filepath.Join(s.rootPath, to)
+	err := os.MkdirAll(filepath.Join(s.rootPath, parent), 0755)
 	if err != nil {
 		return err
 	}
